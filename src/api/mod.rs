@@ -9,6 +9,7 @@ use axum::{
     routing::{get, post},
     Router,
 };
+use tower_http::services::ServeDir;
 
 use crate::store::PanStore;
 
@@ -26,6 +27,7 @@ pub fn router(store: Arc<PanStore>) -> Router {
         .route("/actors/:actor_id/events", get(query::get_actor_events))
         .route("/nodes/:pan_id/events", get(query::get_node_events))
         .with_state(state)
+        .fallback_service(ServeDir::new("frontend"))
 }
 
 pub(crate) fn now_ms() -> i64 {

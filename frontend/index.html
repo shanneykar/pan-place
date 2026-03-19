@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PAN — Physical Anchor Network</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1><a href="/">PAN</a></h1>
+    <p>Physical Anchor Network — verified real-world interactions</p>
+  </header>
+  <main>
+    <div class="lookup">
+      <h2>Look up a node</h2>
+      <div class="input-row">
+        <input type="text" id="node-input" placeholder="Node ID (pan_id)" autocomplete="off" spellcheck="false">
+        <button onclick="goNode()">View</button>
+      </div>
+    </div>
+
+    <div class="lookup">
+      <h2>Look up an actor</h2>
+      <div class="input-row">
+        <input type="text" id="actor-input" placeholder="Actor ID (actor_id)" autocomplete="off" spellcheck="false">
+        <button onclick="goActor()">View</button>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    function goNode() {
+      const v = document.getElementById('node-input').value.trim();
+      if (v) window.location.href = `/node.html?id=${encodeURIComponent(v)}`;
+    }
+    function goActor() {
+      const v = document.getElementById('actor-input').value.trim();
+      if (v) window.location.href = `/actor.html?id=${encodeURIComponent(v)}`;
+    }
+    document.getElementById('node-input').addEventListener('keydown', e => { if (e.key === 'Enter') goNode(); });
+    document.getElementById('actor-input').addEventListener('keydown', e => { if (e.key === 'Enter') goActor(); });
+  </script>
+</body>
+</html>

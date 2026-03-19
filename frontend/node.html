@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Node — PAN</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1><a href="/">PAN</a></h1>
+    <p>Physical Anchor Network</p>
+  </header>
+  <main>
+    <div id="content"><p class="empty">Loading…</p></div>
+  </main>
+
+  <script src="/app.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const panId = params.get('id');
+
+    if (!panId) {
+      document.getElementById('content').innerHTML = '<p class="error-msg">No node ID provided.</p>';
+    } else {
+      fetch(`/nodes/${encodeURIComponent(panId)}/events`)
+        .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
+        .then(data => render(data))
+        .catch(err => {
+          document.getElementById('content').innerHTML =
+            `<p class="error-msg">${err.message || JSON.stringify(err)}</p>`;
+        });
+    }
+
+    function render(data) {
+      const events = data.events || [];
+      const confirmCounts = buildConfirmCounts(events);
+
+      const presenceCount = events.filter(e => e.event_type === 'presence_recorded').length;
+      const confirmTotal = events.filter(e => e.event_type === 'confirmation_recorded').length;
+      const actorSet = new Set(events.map(e => e.actor_id).filter(Boolean));
+
+      const eventsHtml = events.length === 0
+        ? '<p class="empty">No events yet.</p>'
+        : events.map(e => renderEvent(e, confirmCounts)).join('');
+
+      document.getElementById('content').innerHTML = `
+        <div class="card">
+          <div class="section-label">Node</div>
+          <div class="id-mono">${panId}</div>
+          <div class="stat-row" style="margin-top:1rem">
+            <div class="stat">
+              <span class="stat-value">${presenceCount}</span>
+              <span class="stat-label">presences</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value">${confirmTotal}</span>
+              <span class="stat-label">confirmations</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value">${actorSet.size}</span>
+              <span class="stat-label">actors</span>
+            </div>
+          </div>
+        </div>
+        <div class="section-label">Event history</div>
+        <div class="card">${eventsHtml}</div>
+      `;
+    }
+  </script>
+</body>
+</html>

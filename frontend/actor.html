@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Actor — PAN</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <h1><a href="/">PAN</a></h1>
+    <p>Physical Anchor Network</p>
+  </header>
+  <main>
+    <div id="content"><p class="empty">Loading…</p></div>
+  </main>
+
+  <script src="/app.js"></script>
+  <script>
+    const params = new URLSearchParams(location.search);
+    const actorId = params.get('id');
+
+    if (!actorId) {
+      document.getElementById('content').innerHTML = '<p class="error-msg">No actor ID provided.</p>';
+    } else {
+      fetch(`/actors/${encodeURIComponent(actorId)}/events`)
+        .then(r => r.ok ? r.json() : r.json().then(e => Promise.reject(e)))
+        .then(data => render(data))
+        .catch(err => {
+          document.getElementById('content').innerHTML =
+            `<p class="error-msg">${err.message || JSON.stringify(err)}</p>`;
+        });
+    }
+
+    function render(data) {
+      const events = data.events || [];
+      const confirmCounts = buildConfirmCounts(events);
+
+      const presenceCount = events.filter(e => e.event_type === 'presence_recorded').length;
+      const confirmGiven = events.filter(e => e.event_type === 'confirmation_recorded').length;
+      // confirmations received = events authored by this actor that have been confirmed by others
+      const confirmReceived = events.filter(e =>
+        e.actor_id === actorId && (confirmCounts[e.event_id] || 0) > 0
+      ).length;
+
+      const eventsHtml = events.length === 0
+        ? '<p class="empty">No events yet.</p>'
+        : events.map(e => renderEvent(e, confirmCounts)).join('');
+
+      document.getElementById('content').innerHTML = `
+        <div class="card">
+          <div class="section-label">Actor</div>
+          <div class="id-mono">${actorId}</div>
+          <div class="stat-row" style="margin-top:1rem">
+            <div class="stat">
+              <span class="stat-value">${presenceCount}</span>
+              <span class="stat-label">presences</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value">${confirmGiven}</span>
+              <span class="stat-label">confirmations given</span>
+            </div>
+            <div class="stat">
+              <span class="stat-value">${confirmReceived}</span>
+              <span class="stat-label">events confirmed</span>
+            </div>
+          </div>
+        </div>
+        <div class="section-label">Event history</div>
+        <div class="card">${eventsHtml}</div>
+      `;
+    }
+  </script>
+</body>
+</html>

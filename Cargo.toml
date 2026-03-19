@@ -20,7 +20,7 @@ path = "src/lib.rs"
 axum = "0.7"
 tokio = { version = "1", features = ["full"] }
 tower = "0.4"
-tower-http = { version = "0.5", features = ["trace", "cors"] }
+tower-http = { version = "0.5", features = ["trace", "cors", "fs"] }
 
 # Database (index layer)
 sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio", "migrate"] }
