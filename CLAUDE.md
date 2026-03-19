@@ -552,5 +552,316 @@ All error responses: `{ "error": "error_code", "message": "human readable" }`
 
 ---
 
+## CLI CLIENT — Session 4
+
+### What We Are Building
+
+A command-line client binary `pan-cli` that talks to the PAN layer-0 server.
+It generates keypairs locally, signs events locally, and sends them to the server.
+Private keys never leave the local machine.
+
+This is the reference client. If someone wants to build a mobile app or web client,
+this CLI proves every flow works and shows exactly how to use the API.
+
+---
+
+### Binary Setup
+
+Add to Cargo.toml:
+
+```toml
+[[bin]]
+name = "pan-cli"
+path = "src/cli/main.rs"
+
+[dependencies]
+# Add these to existing dependencies
+clap = { version = "4", features = ["derive"] }
+dirs = "5"
+reqwest = { version = "0.12", features = ["json"] }
+dialoguer = "0.11"
+```
+
+---
+
+### Local Identity Storage
+
+The CLI stores identity on disk. One file. Never uploaded.
+
+```
+~/.pan/
+├── identity.json        # keypair + actor_id + server URL
+```
+
+`identity.json` structure:
+```json
+{
+  "actor_id": "hex64",
+  "pubkey": "hex64",
+  "secret_key": "hex64",
+  "phone_dhash": "hex64",
+  "server": "http://127.0.0.1:3000",
+  "created_at": 1234567890000
+}
+```
+
+`secret_key` is the Ed25519 signing key. Stored locally only.
+The CLI reads this file for every command that needs signing.
+If file doesn't exist, most commands fail with: "No identity found. Run: pan-cli identity create"
+
+---
+
+### Commands
+
+#### `pan-cli identity create`
+
+Interactive. Generates everything needed to register.
+
+```
+1. Generate Ed25519 keypair
+2. Derive actor_id from pubkey
+3. Prompt: "Enter phone number (used once, never stored raw):"
+4. Compute phone_dhash = blake3(blake3(phone_bytes))
+5. Prompt: "Server URL [http://127.0.0.1:3000]:"
+6. Sign actor_id with private key
+7. POST /actors with { actor_id, pubkey, phone_dhash, signature, created_at }
+8. On 201: save identity.json to ~/.pan/
+9. Print: "Identity created. Actor ID: <id>"
+```
+
+If `~/.pan/identity.json` already exists, warn and ask to confirm overwrite.
+
+#### `pan-cli identity show`
+
+Prints actor_id, pubkey, server URL. Never prints secret_key.
+
+#### `pan-cli node place --lat <f64> --lon <f64> [--radius <f64>] [--type fixed|ephemeral]`
+
+```
+1. Load identity
+2. Set placed_at = now_ms()
+3. Compute node_hash = blake3(lat_f64_be || lon_f64_be || placed_at_i64_be)
+4. Sign node_hash with private key
+5. POST /nodes with { lat, lon, radius_miles, node_type, actor_id, signature }
+6. Print: "Node placed. PAN ID: <pan_id>"
+```
+
+Default radius: 1.0. Default type: fixed.
+
+#### `pan-cli presence --node <pan_id>`
+
+```
+1. Load identity
+2. GET node info (optional — just to verify node exists, but the server validates anyway)
+3. Build PresenceRecorded event:
+   - entity_id = actor_id (this goes on the actor's DAG)
+   - content = "Presence at node <pan_id>"
+   - tags = []
+   - references_event = None
+   - parent_hashes = [] (or last known event hash for this actor — see DAG chaining below)
+4. Compute event_id via hash_event()
+5. Sign event_id
+6. POST /events
+7. Print: "Presence recorded. Event: <event_id>"
+```
+
+#### `pan-cli event create --content <string> [--tags <comma,separated>] [--entity <id>]`
+
+```
+1. Load identity
+2. Build event:
+   - entity_id = --entity flag, or default to own actor_id
+   - event_type = ConfirmationRecorded if a future confirm references it,
+     but at creation time it's just a ConfirmationRecorded with no references_event.
+     WAIT — this needs thought. See "Event creation model" below.
+3. Compute event_id
+4. Sign
+5. POST /events
+6. Print: "Event created. Event ID: <event_id>\nShare this ID with the other party to confirm."
+```
+
+#### `pan-cli confirm --event <event_id_hash>`
+
+```
+1. Load identity
+2. Build ConfirmationRecorded event:
+   - entity_id = own actor_id
+   - content = "" (or optional --content flag)
+   - tags = [] (or optional --tags flag)
+   - references_event = the event_id being confirmed
+   - parent_hashes = [] or last known event
+3. Compute event_id
+4. Sign
+5. POST /events
+6. Print: "Confirmed. Event: <event_id>"
+```
+
+#### `pan-cli history actor [--id <actor_id>]`
+
+```
+1. Load identity
+2. If no --id flag, use own actor_id
+3. GET /actors/<actor_id>/events
+4. Print formatted table of events: timestamp, type, content, tags, confirmations count
+```
+
+#### `pan-cli history node --id <pan_id> [--from <epoch_ms>] [--to <epoch_ms>] [--type <event_type>]`
+
+```
+1. GET /nodes/<pan_id>/events with query params
+2. Print formatted table
+```
+
+---
+
+### Event Creation Model — Important
+
+There's a subtlety here. In PAN, a "work event" and its "confirmation" are two separate events:
+
+1. **Actor A creates the work event** — type: `ConfirmationRecorded`, content describes the work, tags categorize it, `references_event` is None. This is the claim.
+
+2. **Actor B confirms it** — type: `ConfirmationRecorded`, content can be empty, `references_event` points to Actor A's event hash. This is the confirmation.
+
+WAIT. This breaks the model. A `ConfirmationRecorded` without a `references_event` is a claim, not a confirmation. The server validates that `ConfirmationRecorded` must have `references_event` set.
+
+**Resolution:** The initial work event is NOT a `ConfirmationRecorded`. It needs to be a plain event that describes what happened. But we only have 4 event types and none of them is "work happened."
+
+**Two options:**
+
+**Option A:** Use `PresenceRecorded` for the initial work event (it doesn't require references_event). Overload its meaning: presence at a location = something happened here. Then `ConfirmationRecorded` references it.
+
+**Option B:** The work description IS the `ConfirmationRecorded` event, created by Actor A, with `references_event` pointing to... what? There's nothing to reference yet.
+
+**Correct answer:** The initial event that describes work is a `PresenceRecorded` event. It says "I was here, this happened." The confirmation event is a `ConfirmationRecorded` that references it. This keeps the validation clean and the types meaningful:
+- PresenceRecorded = "something happened here" (claim)
+- ConfirmationRecorded = "yes it did" (verification, always references another event)
+
+Update the CLI commands accordingly:
+- `pan-cli event create` → creates a `PresenceRecorded` event
+- `pan-cli confirm` → creates a `ConfirmationRecorded` referencing it
+
+---
+
+### DAG Chaining
+
+Each actor's events form a chain. The CLI should track the last event_id it created.
+
+Store in `~/.pan/last_event.json`:
+```json
+{
+  "event_id": "hex64"
+}
+```
+
+On every event write, update this file. On next event creation, use it as the single parent_hash.
+If file doesn't exist (first event after registration), parent_hashes is empty (DAG root).
+
+The ActorRegistered event created during `identity create` is the root.
+Store its event_id as the initial last_event.
+
+---
+
+### Output Formatting
+
+Keep it minimal and readable. No fancy TUI.
+
+For history output:
+```
+TIMESTAMP            TYPE                  CONTENT                              TAGS             REFS
+2026-03-18 14:22:01  presence_recorded     Tapped node at Midtown Plumbing                       —
+2026-03-18 14:35:12  presence_recorded     Kitchen sink pipe replaced           plumbing          —
+2026-03-18 14:36:00  confirmation_recorded                                                       a1b2c3...
+```
+
+Truncate content at 40 chars. Show first 8 chars of reference hash.
+
+---
+
+### File Structure
+
+```
+src/cli/
+├── main.rs          ← clap App setup, subcommand dispatch
+├── identity.rs      ← create, show, load from disk
+├── commands/
+│   ├── mod.rs
+│   ├── node.rs      ← place
+│   ├── presence.rs  ← presence
+│   ├── event.rs     ← create
+│   ├── confirm.rs   ← confirm
+│   └── history.rs   ← actor history, node history
+└── client.rs        ← HTTP client wrapper around reqwest, talks to server
+```
+
+---
+
+### Error Handling
+
+- Server returns error JSON: `{ "error": "code", "message": "human text" }`
+- CLI prints: `Error: <message>` and exits with code 1
+- Network errors: `Error: could not connect to server at <url>`
+- Missing identity: `Error: no identity found. Run: pan-cli identity create`
+
+---
+
+### What NOT To Build
+
+- No interactive mode / REPL
+- No config file beyond identity.json and last_event.json
+- No key export / import
+- No multi-identity support
+- No TUI or color output (keep it simple, pipe-friendly)
+- No offline queue
+
+---
+
+### Test Plan
+
+Write `tests/cli_integration.rs` or test manually with a running server.
+
+Manual smoke test sequence:
+```bash
+# Terminal 1: start server
+cargo run --bin pan
+
+# Terminal 2: CLI commands
+pan-cli identity create
+pan-cli identity show
+pan-cli node place --lat 35.2271 --lon -80.8431
+pan-cli presence --node <pan_id from above>
+pan-cli event create --content "Fixed kitchen sink" --tags plumbing,home_repair
+pan-cli confirm --event <event_id from above>   # needs second identity — see below
+pan-cli history actor
+pan-cli history node --id <pan_id>
+```
+
+To test confirmation with two actors:
+```bash
+# Move first identity aside
+mv ~/.pan ~/.pan-actor1
+
+# Create second identity
+pan-cli identity create
+
+# Confirm the event from actor 1
+pan-cli confirm --event <event_id>
+
+# Check both histories
+pan-cli history actor
+mv ~/.pan ~/.pan-actor2
+mv ~/.pan-actor1 ~/.pan
+pan-cli history actor
+```
+
+---
+
+### Session 4 Gate
+
+All commands work. The manual smoke test sequence above completes without errors.
+The full flow — register, place node, presence, create event, confirm with second actor, query histories — produces correct results.
+
+Commit: `"session 4: CLI client, full protocol flow verified"`
+
+---
 *Compiled from PAN design sessions, March 2026.*
 *All decisions final. Hash spec frozen. Event model locked.*
