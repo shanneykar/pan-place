@@ -8,6 +8,10 @@ description = "PAN — Physical Anchor Network, layer-0 server"
 name = "pan"
 path = "src/main.rs"
 
+[[bin]]
+name = "pan-cli"
+path = "src/cli/main.rs"
+
 [lib]
 path = "src/lib.rs"
 
@@ -49,6 +53,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # Time
 chrono = { version = "0.4", features = ["serde"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+dirs = "5"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+dialoguer = "0.11"
 
 [dev-dependencies]
 axum-test = "14"

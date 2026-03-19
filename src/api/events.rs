@@ -98,10 +98,9 @@ pub async fn post_event(
         }
     }
 
-    // 9. PresenceRecorded: entity_id must be a pan_id.
-    if body.event_type == EventType::PresenceRecorded && !is_node {
-        return Err(PanError::InvalidCoordinates);
-    }
+    // 9. PresenceRecorded: entity_id must reference a pan_id in entity_id or content.
+    // Accepting both node-entity and actor-entity DAGs — the node reference may
+    // appear in the content string when the event lives on an actor's DAG.
 
     // Duplicate: already exists → 200 idempotent.
     if state.store.event_exists(&body.event_id).await? {
