@@ -863,5 +863,260 @@ The full flow — register, place node, presence, create event, confirm with sec
 Commit: `"session 4: CLI client, full protocol flow verified"`
 
 ---
+
+## WEB FRONTEND — Session 5
+
+### What We Are Building
+
+A read-only event explorer served as static files by the existing Axum server.
+No JavaScript framework. No build step. Vanilla HTML + CSS + JS.
+Calls the existing GET endpoints. Zero new Rust dependencies.
+
+---
+
+### Server Change — Static File Serving
+
+One change to `main.rs` — add static file serving from `frontend/` directory.
+
+Add to existing dependencies in Cargo.toml:
+```toml
+# Already have tower-http with "trace" and "cors"
+# Add "fs" feature:
+tower-http = { version = "0.5", features = ["trace", "cors", "fs"] }
+```
+
+In `main.rs` or `api/mod.rs`, add to the router:
+
+```rust
+use tower_http::services::ServeDir;
+
+// Add this to the router, AFTER the API routes:
+.fallback_service(ServeDir::new("frontend"))
+```
+
+That's it. API routes take priority. Anything that doesn't match an API route
+gets served from the `frontend/` directory. `frontend/index.html` serves at `/`.
+
+---
+
+### Pages
+
+Three HTML files. No SPA. Each page is standalone.
+
+#### `frontend/index.html` — Landing / Lookup
+
+Minimal page. Two inputs:
+
+- "Look up a node" — text field for pan_id, button goes to `/node.html?id=<pan_id>`
+- "Look up an actor" — text field for actor_id, button goes to `/actor.html?id=<actor_id>`
+
+Also shows:
+- PAN logo / name
+- Tagline: "Real People. Real Space. Real Event."
+- One-line description: "PAN is an open protocol for verified real-world interactions."
+
+No other content. No marketing. No signup.
+
+#### `frontend/node.html` — Node Event Feed
+
+URL: `/node.html?id=<pan_id>`
+
+On load:
+1. Read `id` from URL query params
+2. `fetch('/nodes/${id}/events')` — call the existing GET endpoint
+3. Render the event feed
+
+Layout:
+```
+┌──────────────────────────────────────────────┐
+│  PAN Node: <pan_id>                          │
+│                                              │
+│  Event Feed                                  │
+│  ─────────────────────────────────────────── │
+│                                              │
+│  ┌────────────────────────────────────────┐  │
+│  │ ○ presence_recorded · 3h ago           │  │
+│  │   Tapped node at Midtown Plumbing      │  │
+│  │   Actor: aabbcc...1233                 │  │
+│  └────────────────────────────────────────┘  │
+│                                              │
+│  ┌────────────────────────────────────────┐  │
+│  │ ○ presence_recorded · 8h ago           │  │
+│  │   Kitchen sink pipe replaced.          │  │
+│  │   Tags: plumbing, home_repair          │  │
+│  │   Actor: 9900aa...44aa                 │  │
+│  │   ✓ 2 confirmations                   │  │
+│  └────────────────────────────────────────┘  │
+│                                              │
+│  ┌────────────────────────────────────────┐  │
+│  │ ○ pan_node_placed · Mar 12             │  │
+│  │   Node created                         │  │
+│  │   Actor: aabbcc...1233                 │  │
+│  └────────────────────────────────────────┘  │
+│                                              │
+└──────────────────────────────────────────────┘
+```
+
+Each event card shows:
+- Event type (human readable: "Presence" not "presence_recorded")
+- Relative timestamp ("3h ago", "Mar 12")
+- Content (full text, not truncated)
+- Tags as pills/badges (if any)
+- Actor ID (first 6 + last 4 chars with ellipsis)
+- Confirmation count: count of ConfirmationRecorded events whose references_event matches this event's event_id
+
+**Confirmation count logic:**
+The GET endpoint returns all events for the node. To compute confirmation count for event X:
+```javascript
+const confirmations = events.filter(e =>
+    e.event_type === 'confirmation_recorded' &&
+    e.references_event === X.event_id
+);
+```
+This works because confirmations reference the original event by hash.
+
+Actor IDs in the feed are clickable links to `/actor.html?id=<full_actor_id>`.
+
+#### `frontend/actor.html` — Actor History
+
+URL: `/actor.html?id=<actor_id>`
+
+On load:
+1. Read `id` from URL query params
+2. `fetch('/actors/${id}/events')` — call the existing GET endpoint
+3. Render the history
+
+Layout:
+```
+┌──────────────────────────────────────────────┐
+│  Actor: <actor_id truncated>                 │
+│  Full ID: <actor_id>                         │
+│                                              │
+│  Stats                                       │
+│  Events: 24 · Confirmations given: 8         │
+│  Nodes visited: 3 · Active since: Mar 2026   │
+│                                              │
+│  Event History                               │
+│  ─────────────────────────────────────────── │
+│                                              │
+│  (same card format as node page)             │
+│  Events ordered newest first                 │
+│                                              │
+└──────────────────────────────────────────────┘
+```
+
+Stats are computed client-side from the events array:
+- Total events: `events.length`
+- Confirmations given: events where `event_type === 'confirmation_recorded'`
+- Nodes visited: unique entity_ids that are pan_ids (16-char hex = node, 64-char hex = actor)
+- Active since: earliest event timestamp
+
+---
+
+### Style
+
+Single CSS file: `frontend/style.css`
+
+Design direction from the spec: minimal, trustworthy, infrastructure-grade.
+Earth tones. Not flashy.
+
+```
+Background:   #fafaf8 (warm off-white)
+Cards:        #ffffff with 1px #e0ddd8 border
+Text:         #1a1a1a (near black)
+Secondary:    #6b6560 (warm gray)
+Accent:       #2d6a4f (deep green — trust, grounded)
+Tags:         #f0ede8 background, #4a4540 text
+Confirmation: #2d6a4f green checkmark
+Font:         system-ui, -apple-system, sans-serif
+Max width:    640px centered (readable, not sprawling)
+```
+
+Mobile responsive. Single column. No breakpoint complexity.
+
+---
+
+### JavaScript
+
+Inline in each HTML file or a single `frontend/app.js`. No modules, no bundler.
+
+Key functions:
+```javascript
+// Fetch events for a node
+async function loadNodeEvents(panId) {
+    const res = await fetch(`/nodes/${panId}/events`);
+    if (!res.ok) { showError(res); return; }
+    const data = await res.json();
+    renderEvents(data.events);
+}
+
+// Fetch events for an actor
+async function loadActorEvents(actorId) {
+    const res = await fetch(`/actors/${actorId}/events`);
+    if (!res.ok) { showError(res); return; }
+    const data = await res.json();
+    renderEvents(data.events);
+}
+
+// Render event list
+function renderEvents(events) { /* build cards, compute confirmations, insert into DOM */ }
+
+// Relative time
+function timeAgo(epochMs) { /* "3h ago", "Mar 12", etc */ }
+
+// Truncate actor ID
+function truncateId(id) { return id.slice(0, 6) + '...' + id.slice(-4); }
+```
+
+---
+
+### File Structure
+
+```
+frontend/
+├── index.html       ← landing page with lookup inputs
+├── node.html        ← node event feed
+├── actor.html       ← actor history
+├── style.css        ← single stylesheet
+└── app.js           ← shared JavaScript (optional, can be inline)
+```
+
+---
+
+### CORS
+
+The frontend is served from the same origin as the API (both from Axum).
+No CORS issues. No CORS configuration needed.
+
+---
+
+### What NOT To Build
+
+- No login / authentication
+- No write capability (no creating events from the web)
+- No search / discovery
+- No map view
+- No media upload
+- No real-time updates / websockets
+- No JavaScript framework
+- No build step or bundler
+- No analytics tracking
+- No cookies
+
+---
+
+### Session 5 Gate
+
+Server starts. Navigate to `http://127.0.0.1:3000/` and see the landing page.
+Use CLI to create an actor, place a node, create events, confirm them.
+Navigate to `/node.html?id=<pan_id>` and see the event feed with correct confirmation counts.
+Navigate to `/actor.html?id=<actor_id>` and see the actor's history with stats.
+
+All existing 31 tests still pass (frontend adds no new Rust logic to test).
+
+Commit: `"session 5: read-only web frontend, event explorer"`
+
+---
+
 *Compiled from PAN design sessions, March 2026.*
 *All decisions final. Hash spec frozen. Event model locked.*
