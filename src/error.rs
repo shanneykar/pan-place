@@ -1,3 +1,9 @@
+use axum::{
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
+use serde_json::json;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -55,4 +61,40 @@ pub enum PanError {
 
     #[error("Database error: {0}")]
     DatabaseError(#[from] sqlx::Error),
+}
+
+impl IntoResponse for PanError {
+    fn into_response(self) -> Response {
+        let (status, code) = match &self {
+            PanError::ActorNotFound(_) => (StatusCode::NOT_FOUND, "actor_not_found"),
+            PanError::NodeNotFound(_) => (StatusCode::NOT_FOUND, "node_not_found"),
+            PanError::EventNotFound(_) => (StatusCode::NOT_FOUND, "event_not_found"),
+            PanError::InvalidSignature => (StatusCode::BAD_REQUEST, "invalid_signature"),
+            PanError::InvalidHash => (StatusCode::BAD_REQUEST, "invalid_hash"),
+            PanError::HashMismatch { .. } => (StatusCode::BAD_REQUEST, "hash_mismatch"),
+            PanError::PhoneDhashAlreadyRegistered => {
+                (StatusCode::CONFLICT, "phone_dhash_already_registered")
+            }
+            PanError::ActorAlreadyExists(_) => (StatusCode::CONFLICT, "actor_already_exists"),
+            PanError::ParentNotFound(_) => (StatusCode::BAD_REQUEST, "parent_not_found"),
+            PanError::TooManyParents => (StatusCode::BAD_REQUEST, "too_many_parents"),
+            PanError::InvalidTag(_) => (StatusCode::BAD_REQUEST, "invalid_tag"),
+            PanError::ContentTooLong => (StatusCode::BAD_REQUEST, "content_too_long"),
+            PanError::TimestampNotForward => (StatusCode::BAD_REQUEST, "timestamp_not_forward"),
+            PanError::MissingReference => (StatusCode::BAD_REQUEST, "missing_reference"),
+            PanError::ReferenceNotFound(_) => (StatusCode::BAD_REQUEST, "reference_not_found"),
+            PanError::InvalidCoordinates => (StatusCode::BAD_REQUEST, "invalid_coordinates"),
+            PanError::StorageError(_) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "storage_error")
+            }
+            PanError::DatabaseError(_) => {
+                (StatusCode::INTERNAL_SERVER_ERROR, "database_error")
+            }
+        };
+        (
+            status,
+            Json(json!({ "error": code, "message": self.to_string() })),
+        )
+            .into_response()
+    }
 }
