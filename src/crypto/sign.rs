@@ -34,8 +34,7 @@ pub fn verify(pubkey: &[u8], message: &[u8], signature_hex: &str) -> Result<(), 
         .map_err(|_| PanError::InvalidSignature)
 }
 
-/// Generate a new random keypair for testing.
-#[cfg(test)]
+/// Generate a new random keypair.
 pub fn generate_keypair() -> (SigningKey, VerifyingKey) {
     let signing_key = SigningKey::generate(&mut rand::thread_rng());
     let verifying_key = signing_key.verifying_key();
