@@ -1,0 +1,56 @@
+[package]
+name = "pan"
+version = "0.1.0"
+edition = "2021"
+description = "PAN — Physical Anchor Network, layer-0 server"
+
+[[bin]]
+name = "pan"
+path = "src/main.rs"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+# HTTP server
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+
+# Database (index layer)
+sqlx = { version = "0.7", features = ["sqlite", "runtime-tokio", "migrate"] }
+
+# Crypto
+blake3 = "1"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+
+# Geohash (future use in queries, needed for validation)
+geohash = "0.13"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Unicode normalization (NFC for content hashing)
+unicode-normalization = "0.1"
+
+# Encoding
+hex = "0.4"
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Time
+chrono = { version = "0.4", features = ["serde"] }
+
+[dev-dependencies]
+axum-test = "14"
+tokio-test = "0.4"
+tempfile = "3"
